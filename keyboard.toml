@@ -32,6 +32,7 @@ pin_a = "P1_04"
 pin_b = "P1_06"
 phase = "resolution"
 resolution = 4
+internal_pullup = true
 
 [[split.peripheral]]
 rows = 4
@@ -48,11 +49,13 @@ pin_a = "P1_04"
 pin_b = "P1_06"
 phase = "resolution"
 resolution = 4
+internal_pullup = true
 
 [rmk]
 split_peripherals_num = 1
 debounce_time = 5
 ble_profiles_num = 5
+split_central_sleep_timeout_seconds = 900
 morse_max_num = 32
 max_patterns_per_key = 8
 combo_max_num = 32

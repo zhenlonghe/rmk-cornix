@@ -58,6 +58,9 @@ xz2 = "0.1.7"
 json = "0.12"
 const-gen = "1.6"
 
+[patch.crates-io]
+rmk-macro = { path = "vendor/rmk-macro" }
+
 # Split keyboard example
 [[bin]]
 name = "central"
