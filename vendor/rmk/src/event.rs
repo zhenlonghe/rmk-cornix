@@ -149,6 +149,12 @@ pub enum Axis {
 pub enum ControllerEvent {
     /// Key event and action
     Key(KeyboardEvent, KeyAction),
+    /// Enter the bootloader on the split device that produced the key event
+    #[cfg(feature = "split")]
+    Bootloader(KeyboardEvent),
+    /// Reboot the split device that produced the key event
+    #[cfg(feature = "split")]
+    Reboot(KeyboardEvent),
     /// Battery percent changed
     Battery(u8),
     /// Charging state changed, true means charging, false means not charging

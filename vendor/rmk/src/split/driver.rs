@@ -52,13 +52,48 @@ pub(crate) struct PeripheralManager<
     transceiver: T,
     /// Peripheral id
     id: usize,
+    /// Keys currently held on this peripheral
+    pressed_keys: [[bool; COL]; ROW],
 }
 
 impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFSET: usize, T: SplitReader + SplitWriter>
     PeripheralManager<ROW, COL, ROW_OFFSET, COL_OFFSET, T>
 {
     pub(crate) fn new(transceiver: T, id: usize) -> Self {
-        Self { transceiver, id }
+        Self {
+            transceiver,
+            id,
+            pressed_keys: [[false; COL]; ROW],
+        }
+    }
+
+    fn contains_key_event(event: KeyboardEvent) -> bool {
+        match event.pos {
+            KeyboardEventPos::Key(pos) => {
+                pos.row as usize >= ROW_OFFSET
+                    && (pos.row as usize) < ROW_OFFSET + ROW
+                    && pos.col as usize >= COL_OFFSET
+                    && (pos.col as usize) < COL_OFFSET + COL
+            }
+            KeyboardEventPos::RotaryEncoder(_) => false,
+        }
+    }
+
+    async fn release_all_keys(&mut self) {
+        for row in 0..ROW {
+            for col in 0..COL {
+                if self.pressed_keys[row][col] {
+                    self.pressed_keys[row][col] = false;
+                    KEY_EVENT_CHANNEL
+                        .send(KeyboardEvent::key(
+                            (row + ROW_OFFSET) as u8,
+                            (col + COL_OFFSET) as u8,
+                            false,
+                        ))
+                        .await;
+                }
+            }
+        }
     }
 
     /// Run the manager.
@@ -152,6 +187,24 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
                                 }
                             }
                         }
+                        ControllerEvent::Bootloader(event) if Self::contains_key_event(event) => {
+                            self.release_all_keys().await;
+                            if let Err(e) = self.transceiver.write(&SplitMessage::Bootloader).await {
+                                match e {
+                                    SplitDriverError::Disconnected => return,
+                                    _ => error!("SplitDriver write error: {:?}", e),
+                                }
+                            }
+                        }
+                        ControllerEvent::Reboot(event) if Self::contains_key_event(event) => {
+                            self.release_all_keys().await;
+                            if let Err(e) = self.transceiver.write(&SplitMessage::Reboot).await {
+                                match e {
+                                    SplitDriverError::Disconnected => return,
+                                    _ => error!("SplitDriver write error: {:?}", e),
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -182,12 +235,13 @@ impl<const ROW: usize, const COL: usize, const ROW_OFFSET: usize, const COL_OFFS
                     match e.pos {
                         KeyboardEventPos::Key(key_pos) => {
                             // Verify the row/col
-                            if key_pos.row as usize > ROW || key_pos.col as usize > COL {
+                            if key_pos.row as usize >= ROW || key_pos.col as usize >= COL {
                                 error!("Invalid peripheral row/col: {} {}", key_pos.row, key_pos.col);
                                 continue;
                             }
 
                             if CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire) {
+                                self.pressed_keys[key_pos.row as usize][key_pos.col as usize] = e.pressed;
                                 // Only when the connection is established, send the key event.
                                 let adjusted_key_event = KeyboardEvent::key(
                                     key_pos.row + ROW_OFFSET as u8,

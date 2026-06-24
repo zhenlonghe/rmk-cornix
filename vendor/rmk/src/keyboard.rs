@@ -184,6 +184,10 @@ pub struct Keyboard<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usi
     /// Keymap
     pub(crate) keymap: &'a RefCell<KeyMap<'a, ROW, COL, NUM_LAYER, NUM_ENCODER>>,
 
+    /// Matrix range scanned by this device in a split keyboard.
+    #[cfg(feature = "split")]
+    local_matrix_range: Option<(u8, u8, u8, u8)>,
+
     /// Unprocessed events
     pub unprocessed_events: Vec<KeyboardEvent, 4>,
 
@@ -262,6 +266,8 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
     pub fn new(keymap: &'a RefCell<KeyMap<'a, ROW, COL, NUM_LAYER, NUM_ENCODER>>) -> Self {
         Keyboard {
             keymap,
+            #[cfg(feature = "split")]
+            local_matrix_range: None,
             timer: [[None; ROW]; COL],
             rotary_encoder_timer: [[None; 2]; NUM_ENCODER],
             last_press_time: Instant::now(),
@@ -294,6 +300,29 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
             combo_on: true,
             #[cfg(feature = "controller")]
             controller_pub: unwrap!(CONTROLLER_CHANNEL.publisher()),
+        }
+    }
+
+    /// Set the matrix range scanned locally by the split central.
+    #[cfg(feature = "split")]
+    pub fn set_local_matrix_range(&mut self, row_offset: u8, rows: u8, col_offset: u8, cols: u8) {
+        self.local_matrix_range = Some((row_offset, rows, col_offset, cols));
+    }
+
+    #[cfg(feature = "split")]
+    fn is_local_key_event(&self, event: KeyboardEvent) -> bool {
+        let Some((row_offset, rows, col_offset, cols)) = self.local_matrix_range else {
+            return true;
+        };
+
+        match event.pos {
+            KeyboardEventPos::Key(pos) => {
+                pos.row >= row_offset
+                    && pos.row < row_offset.saturating_add(rows)
+                    && pos.col >= col_offset
+                    && pos.col < col_offset.saturating_add(cols)
+            }
+            KeyboardEventPos::RotaryEncoder(_) => true,
         }
     }
 
@@ -1825,6 +1854,17 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
     fn process_boot(&mut self, key: KeyCode, event: KeyboardEvent) {
         // When releasing the key, process the boot action
         if !event.pressed {
+            #[cfg(all(feature = "split", feature = "controller"))]
+            if !self.is_local_key_event(event) {
+                let controller_event = match key {
+                    KeyCode::Bootloader => ControllerEvent::Bootloader(event),
+                    KeyCode::Reboot => ControllerEvent::Reboot(event),
+                    _ => return,
+                };
+                send_controller_event(&mut self.controller_pub, controller_event);
+                return;
+            }
+
             match key {
                 KeyCode::Bootloader => {
                     boot::jump_to_bootloader();

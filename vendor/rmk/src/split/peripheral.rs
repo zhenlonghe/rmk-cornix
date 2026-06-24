@@ -115,6 +115,8 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                             #[cfg(feature = "controller")]
                             send_controller_event(&mut controller_pub, ControllerEvent::Layer(layer));
                         }
+                        SplitMessage::Bootloader => crate::boot::jump_to_bootloader(),
+                        SplitMessage::Reboot => crate::boot::reboot_keyboard(),
                         _ => (),
                     },
                     Err(e) => {

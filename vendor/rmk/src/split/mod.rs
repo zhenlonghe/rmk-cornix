@@ -38,4 +38,8 @@ pub(crate) enum SplitMessage {
     KeyboardIndicator(u8),
     /// Layer number from central to peripheral
     Layer(u8),
+    /// Enter the peripheral bootloader
+    Bootloader,
+    /// Reboot the peripheral
+    Reboot,
 }
