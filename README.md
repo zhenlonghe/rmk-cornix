@@ -43,7 +43,7 @@ active effect is restored automatically.
 | Inner (right) | Split connection | Breathes blue for up to 60 seconds while disconnected; shows solid blue for 3 seconds after connecting |
 | Outer (left) | BLE connection/profile | Shows the active profile color for 3 seconds after connecting or switching profiles |
 | Outer (left) | BLE advertising | Breathes the active profile color for up to 60 seconds |
-| Outer (left) | Caps Lock | Stays cyan while Caps Lock is active |
+| Outer (left) | Caps Lock | Stays amber while Caps Lock is active |
 
 BLE profile colors are red, green, blue, magenta, and cyan for profiles 1
 through 5.

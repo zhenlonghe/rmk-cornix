@@ -100,6 +100,7 @@ const GREEN: Grb = Grb { g: 12, r: 0, b: 0 };
 const BLUE: Grb = Grb { g: 0, r: 0, b: 18 };
 const MAGENTA: Grb = Grb { g: 0, r: 14, b: 16 };
 const CYAN: Grb = Grb { g: 10, r: 0, b: 14 };
+const AMBER: Grb = Grb { g: 7, r: 18, b: 0 };
 
 pub struct Ws2812Indicator {
     pwm: SequencePwm<'static>,
@@ -345,7 +346,7 @@ impl Ws2812Indicator {
                 } else if self.ble_advertising && self.ble_since.elapsed() < ACTIVITY {
                     LightEffect::Breath(self.profile_color())
                 } else if self.caps_lock {
-                    LightEffect::Solid(CYAN)
+                    LightEffect::Solid(AMBER)
                 } else {
                     LightEffect::Off
                 }
