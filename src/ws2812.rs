@@ -86,6 +86,12 @@ enum LightEffect {
     LowBattery,
 }
 
+impl LightEffect {
+    fn is_animated(self) -> bool {
+        matches!(self, Self::Breath(_) | Self::LowBattery)
+    }
+}
+
 const OFF: Grb = Grb { g: 0, r: 0, b: 0 };
 // Channel values are perceptually balanced (green reads brighter than red/blue
 // at equal drive) and kept low for power. Hues stay distinct at low brightness.
@@ -108,6 +114,7 @@ pub struct Ws2812Indicator {
     ble_connected: bool,
     ble_advertising: bool,
     peer_connected: bool,
+    caps_lock: bool,
     sleeping: bool,
 
     ble_since: Instant,
@@ -152,6 +159,7 @@ impl Ws2812Indicator {
             ble_connected: false,
             ble_advertising: false,
             peer_connected: false,
+            caps_lock: false,
             sleeping: false,
             ble_since: now,
             peer_since: now,
@@ -192,6 +200,13 @@ impl Ws2812Indicator {
         if connected != self.peer_connected {
             self.peer_since = Instant::now();
             self.peer_connected = connected;
+            self.pending = true;
+        }
+    }
+
+    fn set_caps_lock(&mut self, enabled: bool) {
+        if enabled != self.caps_lock {
+            self.caps_lock = enabled;
             self.pending = true;
         }
     }
@@ -325,14 +340,12 @@ impl Ws2812Indicator {
     fn outer_effect(&self) -> LightEffect {
         match self.role {
             Role::Central => {
-                if self.ble_connected {
-                    if self.ble_since.elapsed() < NOTICE {
-                        LightEffect::Solid(self.profile_color())
-                    } else {
-                        LightEffect::Off
-                    }
+                if self.ble_connected && self.ble_since.elapsed() < NOTICE {
+                    LightEffect::Solid(self.profile_color())
                 } else if self.ble_advertising && self.ble_since.elapsed() < ACTIVITY {
                     LightEffect::Breath(self.profile_color())
+                } else if self.caps_lock {
+                    LightEffect::Solid(CYAN)
                 } else {
                     LightEffect::Off
                 }
@@ -404,10 +417,10 @@ impl Ws2812Indicator {
     }
 
     fn is_animating(&self) -> bool {
-        // A logically-active effect (breath / blink / notice) must keep the fast
-        // cadence even when its instantaneous color is momentarily OFF, e.g. the
-        // breath trough or the dark phase of the low-battery blink. A fade that
-        // has not settled to its target yet also counts.
+        // Animated effects must keep the fast cadence even when their
+        // instantaneous color is momentarily OFF, e.g. the breath trough or
+        // the dark phase of the low-battery blink. Solid effects can drop to
+        // the idle cadence once their fade has settled.
         self.inner_active
             || self.outer_active
             || self.cur_inner != self.tgt_inner
@@ -499,6 +512,9 @@ impl Controller for Ws2812Indicator {
             ControllerEvent::BleProfile(profile) if self.role == Role::Central => {
                 self.set_ble_profile(profile);
             }
+            ControllerEvent::KeyboardIndicator(indicator) if self.role == Role::Central => {
+                self.set_caps_lock(indicator.caps_lock());
+            }
             ControllerEvent::Sleep(sleeping) => self.set_sleeping(sleeping),
             _ => {}
         }
@@ -529,8 +545,8 @@ impl PollingController for Ws2812Indicator {
             self.refresh_low_battery(now);
             let inner = self.inner_effect();
             let outer = self.outer_effect();
-            self.inner_active = !matches!(inner, LightEffect::Off);
-            self.outer_active = !matches!(outer, LightEffect::Off);
+            self.inner_active = inner.is_animated();
+            self.outer_active = outer.is_animated();
             self.tgt_inner = self.effect_color(inner);
             self.tgt_outer = self.effect_color(outer);
         }
