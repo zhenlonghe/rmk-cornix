@@ -95,12 +95,19 @@ impl LightEffect {
 const OFF: Grb = Grb { g: 0, r: 0, b: 0 };
 // Channel values are perceptually balanced (green reads brighter than red/blue
 // at equal drive) and kept low for power. Hues stay distinct at low brightness.
-const RED: Grb = Grb { g: 0, r: 18, b: 0 };
+// MagSafe-style battery green: solid when full, breathing while charging.
 const GREEN: Grb = Grb { g: 12, r: 0, b: 0 };
+// Split-link cool blue (inner LED), kept separate from the profile palette.
 const BLUE: Grb = Grb { g: 0, r: 0, b: 18 };
-const MAGENTA: Grb = Grb { g: 0, r: 14, b: 16 };
-const CYAN: Grb = Grb { g: 10, r: 0, b: 14 };
+// Caps Lock amber.
 const AMBER: Grb = Grb { g: 7, r: 18, b: 0 };
+// Low-battery warning: warm coral, softer than a raw red alarm.
+const CORAL: Grb = Grb { g: 8, r: 18, b: 5 };
+// BLE profile palette: low-saturation "gem" tones that read as a deliberate set
+// on a black board instead of toy RGB. Three profiles are configured.
+const ROSE: Grb = Grb { g: 6, r: 14, b: 8 };
+const EMERALD: Grb = Grb { g: 12, r: 4, b: 8 };
+const SAPPHIRE: Grb = Grb { g: 6, r: 4, b: 16 };
 
 pub struct Ws2812Indicator {
     pwm: SequencePwm<'static>,
@@ -251,11 +258,10 @@ impl Ws2812Indicator {
 
     fn profile_color(&self) -> Grb {
         match self.ble_profile {
-            0 => RED,
-            1 => GREEN,
-            2 => BLUE,
-            3 => MAGENTA,
-            _ => CYAN,
+            0 => ROSE,
+            1 => EMERALD,
+            2 => SAPPHIRE,
+            _ => SAPPHIRE,
         }
     }
 
@@ -286,7 +292,7 @@ impl Ws2812Indicator {
             LightEffect::Breath(color) => self.breath_color(color),
             LightEffect::LowBattery => {
                 if self.low_blink_on() {
-                    RED
+                    CORAL
                 } else {
                     OFF
                 }
