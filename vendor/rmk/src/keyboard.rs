@@ -1834,22 +1834,104 @@ impl<'a, const ROW: usize, const COL: usize, const NUM_LAYER: usize, const NUM_E
                 // Other user keys are processed when released
                 if id < NUM_BLE_PROFILE as u8 {
                     info!("Switch to profile: {}", id);
+                    self.release_active_keyboard_state().await;
                     // User0~7: Swtich to the specific profile
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::SwitchProfile(id)).await;
                 } else if id == NUM_BLE_PROFILE as u8 {
+                    self.release_active_keyboard_state().await;
                     // User8: Next profile
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::NextProfile).await;
                 } else if id == NUM_BLE_PROFILE as u8 + 1 {
+                    self.release_active_keyboard_state().await;
                     // User9: Previous profile
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::PreviousProfile).await;
                 } else if id == NUM_BLE_PROFILE as u8 + 2 {
                     // User10: Clear profile
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::ClearProfile).await;
                 } else if id == NUM_BLE_PROFILE as u8 + 3 {
+                    self.release_active_keyboard_state().await;
                     // User11:
                     BLE_PROFILE_CHANNEL.send(BleProfileAction::ToggleConnection).await;
                 }
             }
+        }
+    }
+
+    async fn release_active_keyboard_state(&mut self) {
+        while let Some(held_key) = self.held_buffer.keys.pop() {
+            if let KeyState::ProcessedButReleaseNotReportedYet(action) = held_key.state {
+                self.release_processed_action(action, held_key.event);
+            }
+        }
+
+        self.unprocessed_events.clear();
+        self.osl_state = OneShotState::None;
+        self.osm_state = OneShotState::None;
+        self.with_modifiers = ModifierCombination::default();
+        self.held_modifiers = ModifierCombination::default();
+        self.held_keycodes = [KeyCode::No; 6];
+        self.registered_keys = [None; 6];
+
+        let had_mouse = self.mouse_report.buttons != 0
+            || self.mouse_report.x != 0
+            || self.mouse_report.y != 0
+            || self.mouse_report.wheel != 0
+            || self.mouse_report.pan != 0;
+
+        self.send_keyboard_report_with_resolved_modifiers(false).await;
+        self.media_report.usage_id = 0;
+        self.send_media_report().await;
+        self.system_control_report.usage_id = 0;
+        self.send_system_control_report().await;
+        if had_mouse {
+            self.mouse_report = MouseReport {
+                buttons: 0,
+                x: 0,
+                y: 0,
+                wheel: 0,
+                pan: 0,
+            };
+            self.send_mouse_report().await;
+        }
+    }
+
+    fn release_processed_action(&mut self, action: Action, event: KeyboardEvent) {
+        match action {
+            Action::Key(key) => {
+                if key.is_basic() {
+                    self.unregister_key(key, KeyboardEvent { pressed: false, ..event });
+                } else if key.is_mouse_key() {
+                    self.mouse_report = MouseReport {
+                        buttons: 0,
+                        x: 0,
+                        y: 0,
+                        wheel: 0,
+                        pan: 0,
+                    };
+                } else if key.is_consumer() {
+                    self.media_report.usage_id = 0;
+                } else if key.is_system() {
+                    self.system_control_report.usage_id = 0;
+                }
+            }
+            Action::Modifier(modifiers) => {
+                self.held_modifiers &= !modifiers;
+            }
+            Action::KeyWithModifier(key, modifiers) => {
+                if key.is_basic() {
+                    self.unregister_key(key, KeyboardEvent { pressed: false, ..event });
+                }
+                self.with_modifiers &= !modifiers;
+            }
+            Action::LayerOn(layer) => self.keymap.borrow_mut().deactivate_layer(layer),
+            Action::LayerOnWithModifier(layer, modifiers) => {
+                self.held_modifiers &= !modifiers;
+                self.keymap.borrow_mut().deactivate_layer(layer);
+            }
+            Action::LayerOff(layer) => self.keymap.borrow_mut().activate_layer(layer),
+            Action::OneShotLayer(_) => self.osl_state = OneShotState::None,
+            Action::OneShotModifier(_) => self.osm_state = OneShotState::None,
+            _ => {}
         }
     }
 
