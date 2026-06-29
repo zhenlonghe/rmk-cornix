@@ -46,7 +46,7 @@ struct SplitBleCentralService {
     #[characteristic(uuid = "0e6313e3-bd0b-45c2-8d2e-37a2e8128bc3", read, notify)]
     message_to_central: [u8; SPLIT_MESSAGE_MAX_SIZE],
 
-    #[characteristic(uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c", write_without_response, read, notify)]
+    #[characteristic(uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c", write, write_without_response, read, notify)]
     message_to_peripheral: [u8; SPLIT_MESSAGE_MAX_SIZE],
 }
 
@@ -476,24 +476,29 @@ impl<'a, 'b, 'c, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> Sp
         }
         // Always sync the connection state to peripheral since central doesn't know the CONNECTION_STATE of the peripheral.
         let mut buf = [0_u8; SPLIT_MESSAGE_MAX_SIZE];
-        match postcard::to_slice(&message, &mut buf) {
-            Ok(_bytes) => {
-                if let Err(e) = self
-                    .client
-                    .write_characteristic_without_response(&self.message_to_peripheral, &buf)
-                    .await
-                {
-                    if let BleHostError::BleHost(Error::NotFound) = e {
-                        error!("Peripheral disconnected");
-                        return Err(SplitDriverError::Disconnected);
-                    }
-                    #[cfg(feature = "defmt")]
-                    let e = defmt::Debug2Format(&e);
-                    error!("BLE message_to_peripheral_write error: {:?}", e);
-                }
+        postcard::to_slice(message, &mut buf).map_err(|e| {
+            error!("Postcard serialize split message error: {}", e);
+            SplitDriverError::SerializeError
+        })?;
+        match with_timeout(
+            Duration::from_secs(8),
+            self.client
+                .write_characteristic(&self.message_to_peripheral, &buf),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                #[cfg(feature = "defmt")]
+                let e = defmt::Debug2Format(&e);
+                error!("BLE message_to_peripheral_write error, reconnecting: {:?}", e);
+                return Err(SplitDriverError::Disconnected);
             }
-            Err(e) => error!("Postcard serialize split message error: {}", e),
-        };
+            Err(_) => {
+                error!("BLE message_to_peripheral_write timeout, reconnecting");
+                return Err(SplitDriverError::Disconnected);
+            }
+        }
 
         Ok(SPLIT_MESSAGE_MAX_SIZE)
     }

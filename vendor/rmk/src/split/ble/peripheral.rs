@@ -24,7 +24,7 @@ pub(crate) struct SplitBleService {
     #[characteristic(uuid = "0e6313e3-bd0b-45c2-8d2e-37a2e8128bc3", read, notify, indicate)]
     pub(crate) message_to_central: [u8; SPLIT_MESSAGE_MAX_SIZE],
 
-    #[characteristic(uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c", write_without_response, read, notify)]
+    #[characteristic(uuid = "4b3514fb-cae4-4d38-a097-3a2a3d1c3b9c", write, write_without_response, read, notify)]
     pub(crate) message_to_peripheral: [u8; SPLIT_MESSAGE_MAX_SIZE],
 }
 
@@ -61,9 +61,10 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitReader for BleSplitPeripheralDrive
                     return Err(SplitDriverError::Disconnected);
                 }
                 GattConnectionEvent::Gatt { event: gatt_event } => {
-                    match &gatt_event {
+                    let (message, invalid_message) = match &gatt_event {
                         GattEvent::Read(event) => {
                             info!("Gatt read event: {:?}", event.handle());
+                            (None, false)
                         }
                         GattEvent::Write(event) => {
                             // Write to peripheral
@@ -72,19 +73,34 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitReader for BleSplitPeripheralDrive
                                 match postcard::from_bytes::<SplitMessage>(event.data()) {
                                     Ok(message) => {
                                         trace!("Message from central: {:?}", message);
-                                        break message;
+                                        (Some(message), false)
                                     }
-                                    Err(e) => error!("Postcard deserialize split message error: {}", e),
+                                    Err(e) => {
+                                        error!("Postcard deserialize split message error: {}", e);
+                                        (None, true)
+                                    }
                                 }
                             } else {
                                 info!("Gatt write other event: {:?}", event.handle());
+                                (None, false)
                             }
                         }
-                        _ => debug!("Other gatt event"),
+                        _ => {
+                            debug!("Other gatt event");
+                            (None, false)
+                        }
                     };
-                    match gatt_event.accept() {
+                    let reply = if invalid_message {
+                        gatt_event.reject(AttErrorCode::VALUE_NOT_ALLOWED)
+                    } else {
+                        gatt_event.accept()
+                    };
+                    match reply {
                         Ok(r) => r.send().await,
                         Err(e) => warn!("[gatt] error sending response: {:?}", e),
+                    }
+                    if let Some(message) = message {
+                        break message;
                     }
                 }
                 GattConnectionEvent::ConnectionParamsUpdated {
